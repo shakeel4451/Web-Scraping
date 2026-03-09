@@ -1,54 +1,64 @@
 from playwright.sync_api import sync_playwright
 import time
-import random
+import pandas as pd
 
-def run_amazon_scraper(laptop):
-    # DataHarvest PK Stealth Config
+def run_amazon_optimized(search_query):
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    all_data = []
 
     with sync_playwright() as p:
-        # Launch headed so you can see if a CAPTCHA appears
         browser = p.chromium.launch(headless=False)
-        
-        # LOGIC: Create a context with a real screen size and User-Agent
-        context = browser.new_context(
-            user_agent=USER_AGENT,
-            viewport={'width': 1920, 'height': 1080}
-        )
+        context = browser.new_context(user_agent=USER_AGENT)
         page = context.new_page()
 
-        print(f"🔍 Searching Amazon UK for: {laptop}")
-        page.goto("https://www.amazon.co.uk", wait_until="domcontentloaded")
-        
-        # GUARD: Handle the "Accept Cookies" popup if it appears
+        # Manual Stealth
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+        print(f"🕵️ Infiltrating Amazon UK for: {search_query}")
+        url = f"https://www.amazon.co.uk/s?k={search_query.replace(' ', '+')}"
+        page.goto(url, wait_until="networkidle")
+
+        # 1. NEW LOGIC: Click the "Accept" button from your screenshot
         try:
-            if page.is_visible("#sp-cc-accept"):
-                page.click("#sp-cc-accept")
-                print("🍪 Cookies accepted.")
+            # Using the 'Accept' text from your image banner
+            if page.is_visible("text='Accept'"):
+                page.click("text='Accept'")
+                print("🍪 Cookie banner cleared!")
+                time.sleep(2)
         except:
             pass
 
-        # ACTION: Search for the item
-        page.fill("#twotabsearchtextbox", laptop)
-        time.sleep(random.uniform(1, 2)) # Human-like pause
-        page.keyboard.press("Enter")
-        
-        # WAIT: For results to load
-        page.wait_for_selector(".s-result-item")
-        print("✅ Results loaded!")
+        # 2. HARVESTING: Based on your screenshot
+        # The product cards are visible in the background
+        items = page.locator("[data-component-type='s-search-result']").all()
+        print(f"🔍 Found {len(items)} items on screen.")
 
-        # HARVEST: Get titles and prices of the first 5 items
-        items = page.locator(".s-result-item[data-component-type='s-search-result']").all()
-        
-        for i, item in enumerate(items[:5]):
-            title = item.locator("h2").inner_text()
-            # LOGIC: Some items don't have prices (out of stock)
+        for item in items[:10]:
             try:
-                price = item.locator(".a-price-whole").inner_text()
-                print(f"{i+1}. {title} - £{price}")
+                title = item.locator("h2").inner_text()
+                
+                # Logic: In your image, prices are shown as 'PKR 128,318.61'
+                # Let's look for the 'a-price' container which is more reliable
+                price = item.locator(".a-price").first.inner_text()
+                
+                # Split and clean the price (Removing 'PKR' or newlines)
+                clean_price = price.replace('\n', ' ').strip()
+                
+                all_data.append({
+                    "Product Name": title.strip(),
+                    "Price": clean_price
+                })
+                print(f"✅ Grabbed: {title[:30]}... | {clean_price}")
             except:
-                print(f"{i+1}. {title} - (Price not found/Out of Stock)")
+                continue
+
+        # 3. SAVE
+        if all_data:
+            pd.DataFrame(all_data).to_excel("Amazon_PK_Results.xlsx", index=False)
+            print(f"📊 Success! Saved to Excel.")
+        else:
+            print("❌ Still no data. The elements might be loading too slowly.")
 
         browser.close()
 
-run_amazon_scraper("laptop")
+run_amazon_optimized("laptop")
